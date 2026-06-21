@@ -17,6 +17,15 @@ if (fs.existsSync(publicPath)) {
   app.use(express.static(publicPath));
 }
 
+app.use((req, res, next) => {
+  try {
+    allocationService.expireOldLocks();
+  } catch (e) {
+    console.error('清理过期锁定出错:', e.message);
+  }
+  next();
+});
+
 app.get('/api/shows', (req, res) => {
   const shows = prepare('SELECT * FROM shows ORDER BY date ASC').all();
   res.json(shows);
@@ -165,6 +174,9 @@ app.post('/api/locks/:lockId/confirm', (req, res) => {
 app.post('/api/locks/:lockId/release', (req, res) => {
   const lock = allocationService.releaseLock(req.params.lockId, 'admin_released');
   if (lock) {
+    setTimeout(() => {
+      allocationService.runAllocation(lock.show_id, lock.tier_id, 'admin_release', '运营手动释放锁定');
+    }, 100);
     res.json({ success: true, lock });
   } else {
     res.status(400).json({ error: '锁定不存在或已释放' });
@@ -223,11 +235,15 @@ async function startServer() {
   await initDatabase();
   console.log('数据库初始化完成');
 
-  setInterval(() => {
-    allocationService.expireOldLocks();
-  }, 10000);
-
   allocationService.expireOldLocks();
+
+  setInterval(() => {
+    try {
+      allocationService.expireOldLocks();
+    } catch (e) {
+      console.error('定时清理过期锁定出错:', e.message);
+    }
+  }, 10000);
 
   app.listen(PORT, () => {
     console.log(`候补递补服务运行在 http://localhost:${PORT}`);

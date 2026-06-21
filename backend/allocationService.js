@@ -3,6 +3,31 @@ const { v4: uuidv4 } = require('uuid');
 
 const LOCK_DURATION_SECONDS = 300;
 
+function parseDate(dateStr) {
+  if (!dateStr) return null;
+  let normalized = dateStr.replace('T', ' ').replace('Z', '');
+  if (normalized.includes('.')) {
+    normalized = normalized.split('.')[0];
+  }
+  const d = new Date(normalized + 'Z');
+  if (isNaN(d.getTime())) {
+    return new Date(dateStr);
+  }
+  return d;
+}
+
+function formatSQLiteDate(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
+
+function isExpired(expiresAtStr) {
+  const expiresAt = parseDate(expiresAtStr);
+  if (!expiresAt) return true;
+  return expiresAt.getTime() <= Date.now();
+}
+
 function getConsecutiveSeats(tierId, count) {
   const seats = prepare(`
     SELECT * FROM seats
@@ -47,33 +72,48 @@ function getConsecutiveSeats(tierId, count) {
 }
 
 function hasActiveLock(userId) {
-  const lock = prepare(`
+  const locks = prepare(`
     SELECT * FROM locks
-    WHERE user_id = ? AND status = 'locked' AND expires_at > datetime('now')
-    LIMIT 1
-  `).get(userId);
-  return !!lock;
+    WHERE user_id = ? AND status = 'locked'
+  `).all(userId);
+
+  for (const lock of locks) {
+    if (!isExpired(lock.expires_at)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function getUserActiveLock(userId) {
-  return prepare(`
+  const locks = prepare(`
     SELECT * FROM locks
-    WHERE user_id = ? AND status = 'locked' AND expires_at > datetime('now')
-    LIMIT 1
-  `).get(userId);
+    WHERE user_id = ? AND status = 'locked'
+  `).all(userId);
+
+  for (const lock of locks) {
+    if (!isExpired(lock.expires_at)) {
+      return lock;
+    }
+  }
+  return null;
 }
 
 function expireOldLocks() {
-  const expiredLocks = prepare(`
+  const lockedLocks = prepare(`
     SELECT * FROM locks
-    WHERE status = 'locked' AND expires_at <= datetime('now')
+    WHERE status = 'locked'
   `).all();
 
-  for (const lock of expiredLocks) {
-    releaseLock(lock.id, 'timeout');
+  let expiredCount = 0;
+  for (const lock of lockedLocks) {
+    if (isExpired(lock.expires_at)) {
+      releaseLock(lock.id, 'timeout');
+      expiredCount++;
+    }
   }
 
-  return expiredLocks.length;
+  return expiredCount;
 }
 
 function releaseLock(lockId, reason = 'released') {
@@ -203,7 +243,7 @@ function runAllocation(showId, tierId, triggerType, triggerDetail) {
         WHERE id IN (${placeholders})
       `).run(...seatIds);
 
-      const expiresAt = new Date(Date.now() + LOCK_DURATION_SECONDS * 1000).toISOString();
+      const expiresAt = formatSQLiteDate(new Date(Date.now() + LOCK_DURATION_SECONDS * 1000));
 
       prepare(`
         INSERT INTO locks (id, user_id, show_id, waitlist_entry_id, seat_ids, tier_id, consecutive_count, locked_at, expires_at, status)
@@ -234,7 +274,7 @@ function confirmLock(lockId) {
     return { success: false, error: '锁定不存在或已失效' };
   }
 
-  if (new Date(lock.expires_at) <= new Date()) {
+  if (isExpired(lock.expires_at)) {
     releaseLock(lockId, 'timeout');
     return { success: false, error: '锁定已超时' };
   }
@@ -355,5 +395,8 @@ module.exports = {
   cancelWaitlistEntry,
   refundTicket,
   addWaitlistEntry,
-  LOCK_DURATION_SECONDS
+  LOCK_DURATION_SECONDS,
+  isExpired,
+  parseDate,
+  formatSQLiteDate,
 };
