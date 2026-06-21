@@ -65,11 +65,12 @@ app.get('/api/shows/:showId/seats', (req, res) => {
 });
 
 app.get('/api/shows/:showId/waitlist', (req, res) => {
-  const { tierId } = req.query;
+  const { tierId, status } = req.query;
   let query = `
-    SELECT we.*, u.name as user_name, u.phone as user_phone
+    SELECT we.*, u.name as user_name, u.phone as user_phone, tt.name as tier_name
     FROM waitlist_entries we
     JOIN users u ON we.user_id = u.id
+    JOIN ticket_tiers tt ON we.tier_id = tt.id
     WHERE we.show_id = ?
   `;
   const params = [req.params.showId];
@@ -77,20 +78,35 @@ app.get('/api/shows/:showId/waitlist', (req, res) => {
     query += ' AND we.tier_id = ?';
     params.push(tierId);
   }
+  if (status) {
+    query += ' AND we.status = ?';
+    params.push(status);
+  }
   query += ' ORDER BY we.submitted_at ASC';
   const entries = prepare(query).all(...params);
   res.json(entries);
 });
 
 app.get('/api/shows/:showId/locks', (req, res) => {
-  const locks = prepare(`
-    SELECT l.*, u.name as user_name, tt.name as tier_name
+  const { tierId, status } = req.query;
+  let query = `
+    SELECT l.*, u.name as user_name, u.phone as user_phone, tt.name as tier_name
     FROM locks l
     JOIN users u ON l.user_id = u.id
     JOIN ticket_tiers tt ON l.tier_id = tt.id
     WHERE l.show_id = ?
-    ORDER BY l.locked_at DESC
-  `).all(req.params.showId);
+  `;
+  const params = [req.params.showId];
+  if (tierId) {
+    query += ' AND l.tier_id = ?';
+    params.push(tierId);
+  }
+  if (status) {
+    query += ' AND l.status = ?';
+    params.push(status);
+  }
+  query += ' ORDER BY l.locked_at DESC';
+  const locks = prepare(query).all(...params);
   res.json(locks);
 });
 
@@ -218,6 +234,61 @@ app.get('/api/users/:userId/bookings', (req, res) => {
     ORDER BY cb.confirmed_at DESC
   `).all(req.params.userId);
   res.json(bookings);
+});
+
+app.get('/api/users/:userId/waitlist', (req, res) => {
+  const waitlist = prepare(`
+    SELECT we.*, s.name as show_name, tt.name as tier_name, s.date as show_date, s.venue as show_venue
+    FROM waitlist_entries we
+    JOIN shows s ON we.show_id = s.id
+    JOIN ticket_tiers tt ON we.tier_id = tt.id
+    WHERE we.user_id = ?
+    ORDER BY we.submitted_at DESC
+  `).all(req.params.userId);
+  res.json(waitlist);
+});
+
+app.get('/api/users/:userId/overview', (req, res) => {
+  const user = prepare('SELECT * FROM users WHERE id = ?').get(req.params.userId);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
+
+  const waitlist = prepare(`
+    SELECT we.*, s.name as show_name, tt.name as tier_name, s.date as show_date, s.venue as show_venue
+    FROM waitlist_entries we
+    JOIN shows s ON we.show_id = s.id
+    JOIN ticket_tiers tt ON we.tier_id = tt.id
+    WHERE we.user_id = ?
+    ORDER BY we.submitted_at DESC
+  `).all(req.params.userId);
+
+  const locks = prepare(`
+    SELECT l.*, s.name as show_name, tt.name as tier_name, s.date as show_date, s.venue as show_venue
+    FROM locks l
+    JOIN shows s ON l.show_id = s.id
+    JOIN ticket_tiers tt ON l.tier_id = tt.id
+    WHERE l.user_id = ?
+    ORDER BY l.locked_at DESC
+  `).all(req.params.userId);
+
+  const bookings = prepare(`
+    SELECT cb.*, s.name as show_name, tt.name as tier_name, s.date as show_date, s.venue as show_venue
+    FROM confirmed_bookings cb
+    JOIN shows s ON cb.show_id = s.id
+    JOIN ticket_tiers tt ON cb.tier_id = tt.id
+    WHERE cb.user_id = ?
+    ORDER BY cb.confirmed_at DESC
+  `).all(req.params.userId);
+
+  const stats = {
+    total_waitlist: waitlist.length,
+    waiting_count: waitlist.filter(w => w.status === 'waiting').length,
+    pending_confirmation_count: waitlist.filter(w => w.status === 'pending_confirmation').length,
+    total_locks: locks.length,
+    active_locks: locks.filter(l => l.status === 'locked').length,
+    total_bookings: bookings.length,
+  };
+
+  res.json({ user, waitlist, locks, bookings, stats });
 });
 
 app.get('/api/health', (req, res) => {
