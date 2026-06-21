@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  waitlist:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - waitlist_data:/app/data
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+
+volumes:
+  waitlist_data:
