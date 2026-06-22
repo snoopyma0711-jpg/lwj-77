@@ -108,6 +108,14 @@ function Users() {
     await loadUserOverview(user.id);
   };
 
+  const parseUTC = (dateStr) => {
+    if (!dateStr) return dayjs();
+    if (typeof dateStr === 'string' && !dateStr.endsWith('Z') && dateStr.includes(' ')) {
+      return dayjs(dateStr.replace(' ', 'T') + 'Z');
+    }
+    return dayjs(dateStr);
+  };
+
   const getStatusTag = (status) => {
     const statusMap = {
       waiting: { color: 'blue', text: '等待中' },
@@ -117,7 +125,6 @@ function Users() {
       expired: { color: 'red', text: '已过期' },
       locked: { color: 'orange', text: '锁定中' },
       released: { color: 'default', text: '已释放' },
-      confirmed_lock: { color: 'green', text: '已确认' },
       timeout: { color: 'red', text: '超时释放' },
       admin_released: { color: 'default', text: '运营释放' },
       user_cancelled: { color: 'default', text: '用户取消' },
@@ -128,7 +135,7 @@ function Users() {
 
   const getTimeRemaining = (expiresAt) => {
     const now = dayjs();
-    const expire = dayjs(expiresAt);
+    const expire = parseUTC(expiresAt);
     const diff = expire.diff(now, 'second');
     if (diff <= 0) return { text: '已超时', danger: true, warn: false };
     if (diff <= 60) return { text: `${diff}秒后过期`, danger: true, warn: true };
@@ -166,7 +173,7 @@ function Users() {
       title: '提交时间',
       dataIndex: 'submitted_at',
       key: 'submitted_at',
-      render: (t) => dayjs(t).format('MM-DD HH:mm:ss'),
+      render: (t) => parseUTC(t).format('MM-DD HH:mm:ss'),
       width: 140,
     },
     {
@@ -218,7 +225,7 @@ function Users() {
       title: '锁定时间',
       dataIndex: 'locked_at',
       key: 'locked_at',
-      render: (t) => dayjs(t).format('MM-DD HH:mm:ss'),
+      render: (t) => parseUTC(t).format('MM-DD HH:mm:ss'),
       width: 140,
     },
     {
@@ -249,7 +256,7 @@ function Users() {
           >
             <Space direction="vertical" size={0}>
               <Text style={{ color: textColor }}>
-                {dayjs(t).format('MM-DD HH:mm:ss')}
+                {parseUTC(t).format('MM-DD HH:mm:ss')}
               </Text>
               {record.status === 'locked' && (
                 <Text type="secondary" style={{ fontSize: 12, color: textColor }}>
@@ -310,7 +317,7 @@ function Users() {
       title: '确认时间',
       dataIndex: 'confirmed_at',
       key: 'confirmed_at',
-      render: (t) => dayjs(t).format('MM-DD HH:mm:ss'),
+      render: (t) => parseUTC(t).format('MM-DD HH:mm:ss'),
       width: 140,
     },
     {
@@ -396,7 +403,7 @@ function Users() {
       title: '注册时间',
       dataIndex: 'created_at',
       key: 'created_at',
-      render: (t) => dayjs(t).format('YYYY-MM-DD HH:mm'),
+      render: (t) => parseUTC(t).format('YYYY-MM-DD HH:mm'),
       width: 160,
     },
     {
@@ -533,7 +540,7 @@ function Users() {
                     </Text>
                     <Text>
                       <Text type="secondary">注册时间：</Text>
-                      {dayjs(overviewData.user.created_at).format('YYYY-MM-DD HH:mm:ss')}
+                      {parseUTC(overviewData.user.created_at).format('YYYY-MM-DD HH:mm:ss')}
                     </Text>
                   </Space>
                 </Col>

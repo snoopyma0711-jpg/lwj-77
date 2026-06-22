@@ -145,11 +145,21 @@ function ShowDetail() {
     }
   };
 
+  const loadTiers = async () => {
+    try {
+      const res = await api.get(`/shows/${showId}/tiers`);
+      setTiers(res.data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
     loadData();
     const timer = setInterval(() => {
-      api.get('/health').catch(() => {});
-    }, 5000);
+      loadLocks();
+      loadTiers();
+    }, 30000);
     return () => clearInterval(timer);
   }, [showId]);
 
@@ -173,6 +183,7 @@ function ShowDetail() {
       setAddWaitlistVisible(false);
       form.resetFields();
       loadWaitlist();
+      loadTiers();
     } catch (e) {
       message.error(e.response?.data?.error || '操作失败');
     }
@@ -188,6 +199,7 @@ function ShowDetail() {
           message.success('已取消候补');
           loadWaitlist();
           loadLocks();
+          loadTiers();
         } catch (e) {
           message.error(e.response?.data?.error || '操作失败');
         }
@@ -205,6 +217,7 @@ function ShowDetail() {
           message.success('确认成功');
           loadLocks();
           loadBookings();
+          loadTiers();
         } catch (e) {
           message.error(e.response?.data?.error || '操作失败');
         }
@@ -222,6 +235,7 @@ function ShowDetail() {
           message.success('已释放');
           loadLocks();
           loadWaitlist();
+          loadTiers();
         } catch (e) {
           message.error(e.response?.data?.error || '操作失败');
         }
@@ -235,6 +249,7 @@ function ShowDetail() {
       message.success('已触发递补分配');
       loadWaitlist();
       loadLocks();
+      loadTiers();
     } catch (e) {
       message.error(e.response?.data?.error || '操作失败');
     }
@@ -251,6 +266,7 @@ function ShowDetail() {
           loadSeats();
           loadWaitlist();
           loadLocks();
+          loadTiers();
         } catch (e) {
           message.error(e.response?.data?.error || '操作失败');
         }
@@ -268,6 +284,14 @@ function ShowDetail() {
     }
   };
 
+  const parseUTC = (dateStr) => {
+    if (!dateStr) return dayjs();
+    if (typeof dateStr === 'string' && !dateStr.endsWith('Z') && dateStr.includes(' ')) {
+      return dayjs(dateStr.replace(' ', 'T') + 'Z');
+    }
+    return dayjs(dateStr);
+  };
+
   const getStatusTag = (status) => {
     const statusMap = {
       waiting: { color: 'blue', text: '等待中' },
@@ -277,12 +301,11 @@ function ShowDetail() {
       expired: { color: 'red', text: '已过期' },
       locked: { color: 'orange', text: '锁定中' },
       released: { color: 'default', text: '已释放' },
-      confirmed_lock: { color: 'green', text: '已确认' },
-      sold: { color: 'green', text: '已售出' },
-      available: { color: 'blue', text: '可售' },
+      timeout: { color: 'red', text: '超时释放' },
       admin_released: { color: 'default', text: '运营释放' },
       user_cancelled: { color: 'default', text: '用户取消' },
-      timeout: { color: 'red', text: '超时释放' },
+      sold: { color: 'green', text: '已售出' },
+      available: { color: 'blue', text: '可售' },
     };
     const cfg = statusMap[status] || { color: 'default', text: status };
     return <Tag color={cfg.color}>{cfg.text}</Tag>;
@@ -290,7 +313,7 @@ function ShowDetail() {
 
   const getTimeRemaining = (expiresAt) => {
     const now = dayjs();
-    const expire = dayjs(expiresAt);
+    const expire = parseUTC(expiresAt);
     const diff = expire.diff(now, 'second');
     if (diff <= 0) return { text: '已超时', danger: true, warn: false, minutes: 0 };
     if (diff <= 60) return { text: `${diff}秒后过期`, danger: true, warn: true, minutes: Math.ceil(diff / 60) };
@@ -321,11 +344,11 @@ function ShowDetail() {
   const sortedLocks = useMemo(() => {
     return [...filteredLocks].sort((a, b) => {
       if (a.status === 'locked' && b.status === 'locked') {
-        return dayjs(a.expires_at).valueOf() - dayjs(b.expires_at).valueOf();
+        return parseUTC(a.expires_at).valueOf() - parseUTC(b.expires_at).valueOf();
       }
       if (a.status === 'locked') return -1;
       if (b.status === 'locked') return 1;
-      return dayjs(b.locked_at).valueOf() - dayjs(a.locked_at).valueOf();
+      return parseUTC(b.locked_at).valueOf() - parseUTC(a.locked_at).valueOf();
     });
   }, [filteredLocks]);
 
@@ -395,7 +418,7 @@ function ShowDetail() {
       dataIndex: 'submitted_at',
       key: 'submitted_at',
       width: 150,
-      render: (t) => dayjs(t).format('MM-DD HH:mm:ss'),
+      render: (t) => parseUTC(t).format('MM-DD HH:mm:ss'),
     },
     {
       title: '等待时长',
@@ -403,8 +426,8 @@ function ShowDetail() {
       key: 'wait_time',
       width: 110,
       render: (t) => {
-        const hours = dayjs().diff(dayjs(t), 'hour');
-        if (hours < 1) return `${dayjs().diff(dayjs(t), 'minute')}分钟`;
+        const hours = dayjs().diff(parseUTC(t), 'hour');
+        if (hours < 1) return `${dayjs().diff(parseUTC(t), 'minute')}分钟`;
         if (hours < 24) return `${hours}小时`;
         return `${Math.floor(hours / 24)}天${hours % 24}小时`;
       },
@@ -500,7 +523,7 @@ function ShowDetail() {
       dataIndex: 'locked_at',
       key: 'locked_at',
       width: 150,
-      render: (t) => dayjs(t).format('MM-DD HH:mm:ss'),
+      render: (t) => parseUTC(t).format('MM-DD HH:mm:ss'),
     },
     {
       title: '过期时间 / 倒计时',
@@ -536,7 +559,7 @@ function ShowDetail() {
           >
             <Space direction="vertical" size={2}>
               <Text style={{ color: textColor, fontWeight: 500 }}>
-                {dayjs(t).format('MM-DD HH:mm:ss')}
+                {parseUTC(t).format('MM-DD HH:mm:ss')}
               </Text>
               {record.status === 'locked' && (
                 <Text type="secondary" style={{ fontSize: 12, color: textColor }}>
@@ -880,8 +903,7 @@ function ShowDetail() {
                   allowClear
                 >
                   <Option value="locked">锁定中</Option>
-                  <Option value="released">已释放</Option>
-                  <Option value="confirmed_lock">已确认</Option>
+                  <Option value="confirmed">已确认</Option>
                   <Option value="timeout">超时释放</Option>
                   <Option value="admin_released">运营释放</Option>
                   <Option value="user_cancelled">用户取消</Option>
@@ -927,7 +949,7 @@ function ShowDetail() {
               {
                 title: '确认时间',
                 dataIndex: 'confirmed_at',
-                render: (t) => dayjs(t).format('MM-DD HH:mm:ss'),
+                render: (t) => parseUTC(t).format('MM-DD HH:mm:ss'),
               },
             ]}
             dataSource={bookings}

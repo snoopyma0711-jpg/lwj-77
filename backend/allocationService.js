@@ -130,7 +130,7 @@ function releaseLock(lockId, reason = 'released') {
 
   prepare(`
     UPDATE locks SET status = ? WHERE id = ?
-  `).run(reason === 'timeout' ? 'expired' : 'released', lockId);
+  `).run(reason, lockId);
 
   prepare(`
     UPDATE waitlist_entries SET status = 'waiting'
